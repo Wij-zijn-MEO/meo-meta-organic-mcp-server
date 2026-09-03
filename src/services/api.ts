@@ -98,6 +98,28 @@ export class MetaApiClient {
     return token;
   }
 
+  /**
+   * Returns the page access token, fetching and caching it on demand.
+   * Removes the "call meta_list_pages first" requirement: any page/post tool
+   * can obtain its own page token as long as the user/System User token has
+   * pages_show_list and the Page is assigned to it.
+   */
+  async ensurePageToken(pageId: string): Promise<string> {
+    const cached = this.pageTokenCache.get(pageId);
+    if (cached) return cached;
+    const res = await this.get<{ access_token?: string }>(`/${pageId}`, {
+      fields: "access_token",
+    });
+    if (!res.access_token) {
+      throw new Error(
+        `Could not obtain a page access token for ${pageId}. ` +
+          `Ensure the Page is assigned to your System User and your token has pages_show_list.`
+      );
+    }
+    this.pageTokenCache.set(pageId, res.access_token);
+    return res.access_token;
+  }
+
   getUserToken(): string {
     return this.userToken;
   }

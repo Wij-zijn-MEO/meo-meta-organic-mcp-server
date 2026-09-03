@@ -251,7 +251,7 @@ Notes:
     },
     async ({ page_id, message, link, published, scheduled_publish_time, response_format }) => {
       try {
-        const pageToken = client.requirePageToken(page_id);
+        const pageToken = await client.ensurePageToken(page_id);
         const fields: Record<string, unknown> = { message, published };
         if (link) fields.link = link;
         if (scheduled_publish_time) fields.scheduled_publish_time = scheduled_publish_time;
@@ -313,7 +313,7 @@ Returns: List of posts with message, permalink, created time, and post ID.`,
     },
     async ({ page_id, limit, after, response_format }) => {
       try {
-        const pageToken = client.requirePageToken(page_id);
+        const pageToken = await client.ensurePageToken(page_id);
         const params: Record<string, unknown> = {
           fields: POST_FIELDS,
           limit,
@@ -381,7 +381,7 @@ Args:
     },
     async ({ post_id, page_id }) => {
       try {
-        const pageToken = client.requirePageToken(page_id);
+        const pageToken = await client.ensurePageToken(page_id);
         const result = await client.delete<{ success: boolean }>(`/${post_id}`, pageToken);
         return {
           content: [
@@ -429,7 +429,7 @@ Args:
     },
     async ({ page_id, url, caption, published, response_format }) => {
       try {
-        const pageToken = client.requirePageToken(page_id);
+        const pageToken = await client.ensurePageToken(page_id);
         const fields: Record<string, unknown> = { url, published };
         if (caption) fields.message = caption;
 
@@ -485,7 +485,7 @@ Args:
     },
     async ({ page_id, file_url, title, description, response_format }) => {
       try {
-        const pageToken = client.requirePageToken(page_id);
+        const pageToken = await client.ensurePageToken(page_id);
         const fields: Record<string, unknown> = { file_url };
         if (title) fields.title = title;
         if (description) fields.description = description;
@@ -539,7 +539,7 @@ Requires pages_messaging permission.`,
     },
     async ({ page_id, limit, after, response_format }) => {
       try {
-        const pageToken = client.requirePageToken(page_id);
+        const pageToken = await client.ensurePageToken(page_id);
         const params: Record<string, unknown> = {
           fields: "id,snippet,updated_time,message_count,participants",
           limit,
@@ -610,7 +610,7 @@ Args:
     },
     async ({ page_id, conversation_id, limit, after, response_format }) => {
       try {
-        const pageToken = client.requirePageToken(page_id);
+        const pageToken = await client.ensurePageToken(page_id);
         const params: Record<string, unknown> = {
           fields: "id,message,from,created_time,attachments",
           limit,
@@ -674,7 +674,7 @@ Requires pages_messaging permission. Only works within the 24-hour messaging win
     },
     async ({ page_id, recipient_id, message }) => {
       try {
-        const pageToken = client.requirePageToken(page_id);
+        const pageToken = await client.ensurePageToken(page_id);
         const result = await client.post<{ recipient_id: string; message_id: string }>(
           `/${page_id}/messages`,
           {
@@ -753,7 +753,7 @@ Returns: Time-series data for each metric.`,
     },
     async ({ page_id, metrics, period, since, until, response_format }) => {
       try {
-        const pageToken = client.requirePageToken(page_id);
+        const pageToken = await client.ensurePageToken(page_id);
         const fetchBatch = (ms: string[]) => {
           const params: Record<string, unknown> = { metric: ms.join(","), period };
           if (since) params.since = since;
@@ -851,7 +851,7 @@ All post metrics use 'lifetime' period (cumulative from post creation).`,
     },
     async ({ post_id, page_id, metrics, response_format }) => {
       try {
-        const pageToken = client.requirePageToken(page_id);
+        const pageToken = await client.ensurePageToken(page_id);
         const fetchBatch = (ms: string[]) =>
           client.getWithToken<{ data: unknown[] }>(`/${post_id}/insights`, pageToken, {
             metric: ms.join(","),
@@ -940,7 +940,7 @@ Requires pages_manage_metadata permission.`,
     },
     async ({ page_id, about, description, website, phone, emails, hours, category, username, contact_address }) => {
       try {
-        const pageToken = client.requirePageToken(page_id);
+        const pageToken = await client.ensurePageToken(page_id);
         const fields: Record<string, unknown> = {};
         if (about !== undefined) fields.about = about;
         if (description !== undefined) fields.description = description;
@@ -1000,7 +1000,7 @@ Args:
     },
     async ({ post_id, page_id, limit, order, filter, after, response_format }) => {
       try {
-        const pageToken = client.requirePageToken(page_id);
+        const pageToken = await client.ensurePageToken(page_id);
         const params: Record<string, unknown> = {
           fields: "id,message,from,created_time,like_count,comment_count,parent",
           limit,
@@ -1072,7 +1072,7 @@ Args:
     },
     async ({ comment_id, page_id, message, response_format }) => {
       try {
-        const pageToken = client.requirePageToken(page_id);
+        const pageToken = await client.ensurePageToken(page_id);
         const result = await client.post<{ id: string }>(
           `/${comment_id}/comments`,
           { message },
@@ -1117,7 +1117,7 @@ Args:
     },
     async ({ comment_id, page_id }) => {
       try {
-        const pageToken = client.requirePageToken(page_id);
+        const pageToken = await client.ensurePageToken(page_id);
         const result = await client.delete<{ success: boolean }>(`/${comment_id}`, pageToken);
         return {
           content: [{
@@ -1158,7 +1158,7 @@ Args:
     },
     async ({ object_id, page_id, unlike }) => {
       try {
-        const pageToken = client.requirePageToken(page_id);
+        const pageToken = await client.ensurePageToken(page_id);
         if (unlike) {
           await client.delete(`/${object_id}/likes`, pageToken);
         } else {
@@ -1200,7 +1200,7 @@ Args:
     },
     async ({ page_id, limit, after, response_format }) => {
       try {
-        const pageToken = client.requirePageToken(page_id);
+        const pageToken = await client.ensurePageToken(page_id);
         const params: Record<string, unknown> = {
           fields: POST_FIELDS + ",scheduled_publish_time,is_published",
           limit,
@@ -1263,7 +1263,7 @@ Args:
     },
     async ({ page_id, limit, after, response_format }) => {
       try {
-        const pageToken = client.requirePageToken(page_id);
+        const pageToken = await client.ensurePageToken(page_id);
         const params: Record<string, unknown> = {
           fields: "id,name,description,count,type,created_time,link",
           limit,
@@ -1332,7 +1332,7 @@ Args:
     },
     async ({ page_id, limit, time_filter, response_format }) => {
       try {
-        const pageToken = client.requirePageToken(page_id);
+        const pageToken = await client.ensurePageToken(page_id);
         const data = await client.getWithToken<MetaPaginatedResponse<{
           id: string;
           name: string;
@@ -1400,7 +1400,7 @@ Args:
     },
     async ({ page_id, limit, after, response_format }) => {
       try {
-        const pageToken = client.requirePageToken(page_id);
+        const pageToken = await client.ensurePageToken(page_id);
         const params: Record<string, unknown> = { fields: POST_FIELDS, limit };
         if (after) params.after = after;
 
@@ -1464,7 +1464,7 @@ Args:
     },
     async ({ page_id, metric, response_format }) => {
       try {
-        const pageToken = client.requirePageToken(page_id);
+        const pageToken = await client.ensurePageToken(page_id);
         const data = await client.getWithToken<{ data: Array<{
           name: string;
           values: Array<{ value: Record<string, number> }>;
@@ -1579,7 +1579,7 @@ Args:
     },
     async ({ post_id, page_id, message, response_format }) => {
       try {
-        const pageToken = client.requirePageToken(page_id);
+        const pageToken = await client.ensurePageToken(page_id);
         const result = await client.post<{ success: boolean }>(
           `/${post_id}`,
           { message },
@@ -1626,7 +1626,7 @@ Args:
     },
     async ({ page_id, limit, after, response_format }) => {
       try {
-        const pageToken = client.requirePageToken(page_id);
+        const pageToken = await client.ensurePageToken(page_id);
         const params: Record<string, unknown> = {
           fields: "id,title,description,length,views,created_time,permalink_url,source",
           limit,
@@ -1691,7 +1691,7 @@ Args:
     },
     async ({ page_id, limit, after, response_format }) => {
       try {
-        const pageToken = client.requirePageToken(page_id);
+        const pageToken = await client.ensurePageToken(page_id);
         const params: Record<string, unknown> = { fields: POST_FIELDS, limit };
         if (after) params.after = after;
 
@@ -1748,7 +1748,7 @@ Args:
     },
     async ({ page_id, limit, after, response_format }) => {
       try {
-        const pageToken = client.requirePageToken(page_id);
+        const pageToken = await client.ensurePageToken(page_id);
         const params: Record<string, unknown> = { fields: POST_FIELDS, limit };
         if (after) params.after = after;
 
@@ -1802,7 +1802,7 @@ Args:
     },
     async ({ page_id, response_format }) => {
       try {
-        const pageToken = client.requirePageToken(page_id);
+        const pageToken = await client.ensurePageToken(page_id);
         const data = await client.getWithToken<MetaPaginatedResponse<{ id: string; name: string }>>(
           `/${page_id}/blocked`,
           pageToken,
@@ -1850,7 +1850,7 @@ Args:
     },
     async ({ page_id, user_id, unblock }) => {
       try {
-        const pageToken = client.requirePageToken(page_id);
+        const pageToken = await client.ensurePageToken(page_id);
         if (unblock) {
           // Meta unblock: DELETE /{page-id}/blocked?uid={user-id}
           await client.delete(`/${page_id}/blocked`, pageToken, { uid: user_id });
@@ -1884,7 +1884,7 @@ Args:
     },
     async ({ page_id, response_format }) => {
       try {
-        const pageToken = client.requirePageToken(page_id);
+        const pageToken = await client.ensurePageToken(page_id);
         const data = await client.getWithToken<{ data: Array<{
           id: string;
           name: string;
@@ -2036,7 +2036,7 @@ Args:
     },
     async ({ page_id, name, start_time, end_time, description, place, ticket_uri, response_format }) => {
       try {
-        const pageToken = client.requirePageToken(page_id);
+        const pageToken = await client.ensurePageToken(page_id);
         const fields: Record<string, unknown> = { name, start_time };
         if (end_time) fields.end_time = end_time;
         if (description) fields.description = description;
@@ -2076,7 +2076,7 @@ Args:
     },
     async ({ page_id, limit, response_format }) => {
       try {
-        const pageToken = client.requirePageToken(page_id);
+        const pageToken = await client.ensurePageToken(page_id);
         const data = await client.getWithToken<MetaPaginatedResponse<{
           id: string; name: string; location?: { city?: string; state?: string; country?: string; street?: string; zip?: string; latitude?: number; longitude?: number };
         }>>(`/${page_id}/locations`, pageToken, {
@@ -2123,7 +2123,7 @@ Args:
     },
     async ({ page_id, response_format }) => {
       try {
-        const pageToken = client.requirePageToken(page_id);
+        const pageToken = await client.ensurePageToken(page_id);
         const data = await client.getWithToken<{ data: Array<{ id: string; type: string; web_url?: string; status?: string }> }>(
           `/${page_id}/call_to_actions`,
           pageToken,
@@ -2175,7 +2175,7 @@ Args:
     },
     async ({ page_id, type, limit, after, response_format }) => {
       try {
-        const pageToken = client.requirePageToken(page_id);
+        const pageToken = await client.ensurePageToken(page_id);
         const params: Record<string, unknown> = {
           fields: "id,name,picture,source,created_time,link,album",
           limit,
@@ -2230,7 +2230,7 @@ Args:
     },
     async ({ page_id, limit, after, response_format }) => {
       try {
-        const pageToken = client.requirePageToken(page_id);
+        const pageToken = await client.ensurePageToken(page_id);
         const params: Record<string, unknown> = {
           fields: "reviewer,rating,review_text,created_time,recommendation_type",
           limit,
@@ -2290,7 +2290,7 @@ Call without subscribed_fields to check current subscriptions.`,
     },
     async ({ page_id, subscribed_fields, response_format }) => {
       try {
-        const pageToken = client.requirePageToken(page_id);
+        const pageToken = await client.ensurePageToken(page_id);
 
         if (!subscribed_fields?.length) {
           // GET to check current subscriptions
@@ -2349,7 +2349,7 @@ Args:
     },
     async ({ page_id, limit, after, response_format }) => {
       try {
-        const pageToken = client.requirePageToken(page_id);
+        const pageToken = await client.ensurePageToken(page_id);
         const params: Record<string, unknown> = { fields: POST_FIELDS + ",is_eligible_for_promotion", limit };
         if (after) params.after = after;
 
@@ -2406,7 +2406,7 @@ Requires pages_manage_metadata permission.`,
     },
     async ({ page_id, picture_url, response_format }) => {
       try {
-        const pageToken = client.requirePageToken(page_id);
+        const pageToken = await client.ensurePageToken(page_id);
         const result = await client.post<{ success?: boolean; id?: string }>(
           `/${page_id}/picture`,
           { picture: picture_url },
@@ -2460,7 +2460,7 @@ Provide either cover_url or photo_id. Requires pages_manage_metadata permission.
     },
     async ({ page_id, cover_url, photo_id, offset_y, no_feed_story, response_format }) => {
       try {
-        const pageToken = client.requirePageToken(page_id);
+        const pageToken = await client.ensurePageToken(page_id);
         const fields: Record<string, unknown> = {};
         if (cover_url) fields.source = cover_url;
         if (photo_id) fields.photo = photo_id;
@@ -2518,7 +2518,7 @@ Requires pages_manage_engagement permission.`,
     },
     async ({ comment_id, page_id, is_hidden }) => {
       try {
-        const pageToken = client.requirePageToken(page_id);
+        const pageToken = await client.ensurePageToken(page_id);
         await client.post(`/${comment_id}`, { is_hidden }, pageToken);
         return {
           content: [{ type: "text", text: `Comment \`${comment_id}\` ${is_hidden ? "hidden" : "unhidden"} successfully.` }],
@@ -2561,7 +2561,7 @@ Returns the story ID on success.`,
     },
     async ({ page_id, media_url, media_type, response_format }) => {
       try {
-        const pageToken = client.requirePageToken(page_id);
+        const pageToken = await client.ensurePageToken(page_id);
         const fields: Record<string, unknown> =
           media_type === "photo" ? { photo_url: media_url } : { video_url: media_url };
 
@@ -2623,7 +2623,7 @@ Returns the stream URL and live video ID.`,
     },
     async ({ page_id, title, description, planned_start_time, response_format }) => {
       try {
-        const pageToken = client.requirePageToken(page_id);
+        const pageToken = await client.ensurePageToken(page_id);
         const fields: Record<string, unknown> = {
           title,
           status: planned_start_time ? "SCHEDULED_UNPUBLISHED" : "LIVE_NOW",
@@ -2690,7 +2690,7 @@ Returns live video details including title, status, views, and creation time.`,
     },
     async ({ page_id, broadcast_status, limit, after, response_format }) => {
       try {
-        const pageToken = client.requirePageToken(page_id);
+        const pageToken = await client.ensurePageToken(page_id);
         const params: Record<string, unknown> = {
           fields: "id,title,status,embed_html,live_views,planned_start_time,creation_time",
           limit,
@@ -2771,7 +2771,7 @@ Ends the broadcast immediately.`,
     },
     async ({ live_video_id, page_id, response_format }) => {
       try {
-        const pageToken = client.requirePageToken(page_id);
+        const pageToken = await client.ensurePageToken(page_id);
         const result = await client.post<{ success?: boolean }>(
           `/${live_video_id}`,
           { end_live_video: true },
@@ -2822,7 +2822,7 @@ Returns: Instant reply message, away message, greeting text, and ice breakers co
     },
     async ({ page_id, response_format }) => {
       try {
-        const pageToken = client.requirePageToken(page_id);
+        const pageToken = await client.ensurePageToken(page_id);
         const data = await client.getWithToken<Record<string, unknown>>(`/${page_id}`, pageToken, {
           fields: "instant_reply_message,greeting,ice_breakers",
         });
@@ -2899,7 +2899,7 @@ Args:
     },
     async ({ page_id, message, enabled, response_format }) => {
       try {
-        const pageToken = client.requirePageToken(page_id);
+        const pageToken = await client.ensurePageToken(page_id);
         const result = await client.post<Record<string, unknown>>(
           `/${page_id}/page_message_responses`,
           {
@@ -2955,7 +2955,7 @@ Args:
     },
     async ({ page_id, message, enabled, response_format }) => {
       try {
-        const pageToken = client.requirePageToken(page_id);
+        const pageToken = await client.ensurePageToken(page_id);
         const result = await client.post<Record<string, unknown>>(
           `/${page_id}/page_message_responses`,
           {
@@ -3010,7 +3010,7 @@ Args:
     },
     async ({ page_id, greeting_text, response_format }) => {
       try {
-        const pageToken = client.requirePageToken(page_id);
+        const pageToken = await client.ensurePageToken(page_id);
         const result = await client.post<Record<string, unknown>>(
           `/${page_id}/thread_settings`,
           {
@@ -3073,7 +3073,7 @@ Notes:
     },
     async ({ page_id, video_url, description, title, response_format }) => {
       try {
-        const pageToken = client.requirePageToken(page_id);
+        const pageToken = await client.ensurePageToken(page_id);
         const fields: Record<string, unknown> = {
           source: video_url,
           video_state: "PUBLISHED",
@@ -3145,7 +3145,7 @@ Returns: Results from both platforms (which succeeded, which failed).`,
     },
     async ({ page_id, ig_account_id, message, image_url, video_url, response_format }) => {
       try {
-        const pageToken = client.requirePageToken(page_id);
+        const pageToken = await client.ensurePageToken(page_id);
 
         const fbPromise = (async (): Promise<{ platform: string; id: string }> => {
           if (image_url) {

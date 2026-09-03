@@ -674,7 +674,7 @@ Note: demographic metrics require 100+ followers. online_followers only availabl
             .array(z.string())
             .default(["reach", "accounts_engaged", "total_interactions", "likes", "comments", "shares", "saves", "profile_links_taps"])
             .describe("Metric names (see description). NOTE: modern metrics (reach/views/interactions) need period 'day' with since/until, not 'days_28'; the tool adds metric_type=total_value automatically."),
-          period: z.enum(["day", "week", "days_28", "month", "lifetime"]).default("day"),
+          period: z.enum(["day", "week", "days_28", "month", "lifetime"]).default("days_28"),
           since: z.string().optional(),
           until: z.string().optional(),
           breakdown: z.enum(["age", "city", "country", "gender"]).optional().describe("For demographic metrics only"),
@@ -691,42 +691,64 @@ Note: demographic metrics require 100+ followers. online_followers only availabl
     },
     async ({ ig_account_id, metrics, period, since, until, breakdown, timeframe, response_format }) => {
       try {
-        const params: Record<string, unknown> = {
-          metric: metrics.join(","),
-          period,
-        };
+        // Build the request, auto-correcting the two quirks of IG account
+        // insights so callers don't have to:
+        //  1. Modern metrics (reach, views, total_interactions, ...) require
+        //     metric_type=total_value — Meta names them in a code-100 error.
+        //  2. Those same metrics reject aggregated periods (days_28/month/week);
+        //     they want period=day plus a since/until window. We translate the
+        //     requested period into an equivalent day-window on demand.
+        const params: Record<string, unknown> = { metric: metrics.join(","), period };
         if (since) params.since = since;
         if (until) params.until = until;
         if (breakdown) params.breakdown = breakdown;
         if (timeframe) params.timeframe = timeframe;
 
-        let data: { data: unknown[] };
-        try {
-          data = await client.get<{ data: unknown[] }>(`/${ig_account_id}/insights`, params);
-        } catch (err) {
-          // Modern IG account metrics (reach, views, total_interactions,
-          // accounts_engaged, saves, ...) must be requested with
-          // metric_type=total_value. Meta names them in the error — retry once.
-          const msg = String(
-            (err instanceof AxiosError
-              ? (err.response?.data as { error?: { message?: string } } | undefined)?.error?.message
-              : "") ?? ""
-          );
-          if (/metric_type=total_value/i.test(msg)) {
-            data = await client.get<{ data: unknown[] }>(`/${ig_account_id}/insights`, {
-              ...params,
-              metric_type: "total_value",
-            });
-          } else {
+        let effectivePeriod: string = period;
+        let addedTotalValue = false;
+        let convertedWindow = false;
+        let data: { data: unknown[] } | undefined;
+
+        for (let attempt = 0; attempt < 4; attempt++) {
+          try {
+            data = await client.get<{ data: unknown[] }>(`/${ig_account_id}/insights`, params);
+            break;
+          } catch (err) {
+            const msg = String(
+              (err instanceof AxiosError
+                ? (err.response?.data as { error?: { message?: string } } | undefined)?.error?.message
+                : "") ?? ""
+            );
+            if (/metric_type=total_value/i.test(msg) && !addedTotalValue) {
+              params.metric_type = "total_value";
+              addedTotalValue = true;
+              continue;
+            }
+            if (/incompatible with the metric/i.test(msg) && !convertedWindow) {
+              const days = period === "week" ? 7 : period === "month" ? 30 : 28;
+              const until_ = (until as string | undefined) ?? new Date().toISOString().slice(0, 10);
+              const since_ =
+                (since as string | undefined) ??
+                new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+              params.period = "day";
+              params.since = since_;
+              params.until = until_;
+              effectivePeriod = `day (${since_} – ${until_})`;
+              convertedWindow = true;
+              continue;
+            }
             throw err;
           }
+        }
+        if (!data) {
+          return errorResult(new Error("Instagram account insights: no data returned after retries."));
         }
 
         if (response_format === "json") {
           return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
         }
 
-        const lines = [`# Instagram Account Insights`, `**Period**: ${period}`, ""];
+        const lines = [`# Instagram Account Insights`, `**Period**: ${effectivePeriod}`, ""];
         for (const item of data.data as Array<{
           name: string;
           title: string;
