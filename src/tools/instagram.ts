@@ -700,7 +700,27 @@ Note: demographic metrics require 100+ followers. online_followers only availabl
         if (breakdown) params.breakdown = breakdown;
         if (timeframe) params.timeframe = timeframe;
 
-        const data = await client.get<{ data: unknown[] }>(`/${ig_account_id}/insights`, params);
+        let data: { data: unknown[] };
+        try {
+          data = await client.get<{ data: unknown[] }>(`/${ig_account_id}/insights`, params);
+        } catch (err) {
+          // Modern IG account metrics (reach, views, total_interactions,
+          // accounts_engaged, saves, ...) must be requested with
+          // metric_type=total_value. Meta names them in the error — retry once.
+          const msg = String(
+            (err instanceof AxiosError
+              ? (err.response?.data as { error?: { message?: string } } | undefined)?.error?.message
+              : "") ?? ""
+          );
+          if (/metric_type=total_value/i.test(msg)) {
+            data = await client.get<{ data: unknown[] }>(`/${ig_account_id}/insights`, {
+              ...params,
+              metric_type: "total_value",
+            });
+          } else {
+            throw err;
+          }
+        }
 
         if (response_format === "json") {
           return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
@@ -711,13 +731,18 @@ Note: demographic metrics require 100+ followers. online_followers only availabl
           name: string;
           title: string;
           period: string;
-          values: Array<{ value: number; end_time: string }>;
+          values?: Array<{ value: number; end_time: string }>;
+          total_value?: { value: number };
         }>) {
           lines.push(`## ${item.title ?? item.name}`);
-          if (item.values?.length) {
+          if (item.total_value && typeof item.total_value.value !== "undefined") {
+            lines.push(`- **${formatNumber(item.total_value.value)}** _(${period})_`);
+          } else if (item.values?.length) {
             for (const v of item.values.slice(-7)) {
               lines.push(`- ${formatDate(v.end_time)}: **${formatNumber(v.value)}**`);
             }
+          } else {
+            lines.push("_No data_");
           }
           lines.push("");
         }
