@@ -1,0 +1,53 @@
+{
+  "name": "meo-insights-mcp",
+  "version": "1.0.0",
+  "description": "Read-only MEO fork of meta-mcp-server: Facebook & Instagram organic insights only. Hardened, no write/publish tools.",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "meo-insights-mcp": "dist/index.js"
+  },
+  "files": [
+    "dist/"
+  ],
+  "scripts": {
+    "start": "node dist/index.js",
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "prepublishOnly": "npm run build",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "clean": "rm -rf dist"
+  },
+  "license": "MIT",
+  "author": "MEO (wijzijnmeo.nl)",
+  "contributors": [
+    "Oliver Ames (original meta-mcp-server author)"
+  ],
+  "keywords": [
+    "mcp",
+    "meta",
+    "facebook",
+    "instagram",
+    "organic-insights",
+    "read-only",
+    "graph-api",
+    "model-context-protocol",
+    "claude",
+    "meo"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.6.1",
+    "axios": "^1.7.9",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^4.1.0"
+  }
+}
