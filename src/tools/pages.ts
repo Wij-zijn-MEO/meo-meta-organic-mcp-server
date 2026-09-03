@@ -1,9 +1,70 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { AxiosError } from "axios";
 import { MetaApiClient } from "../services/api.js";
 import { errorResult, truncate, truncateField, formatNumber, formatDate, buildPaginationNote, ResponseFormatSchema } from "../services/utils.js";
 import { PAGE_FIELDS, POST_FIELDS } from "../constants.js";
 import { MetaPage, MetaPost, MetaPaginatedResponse } from "../types.js";
+
+// --- Insights resilience (MEO read-only build) ---
+// Meta retired most organic Facebook Page/post insight metrics in 2025 (reach,
+// impressions, engaged_users, reactions_by_type_total, ...). A batch /insights
+// call fails atomically with code 100 if ANY requested metric is invalid or
+// unsupported for the requested period — and the API names none of them. For a
+// headless monthly review we must keep the surviving metrics instead of failing
+// the whole call. These helpers drop the offending metrics and cache the ones
+// that are permanently gone so later calls skip them.
+const DEAD_PAGE_METRICS = new Set<string>();
+const DEAD_POST_METRICS = new Set<string>();
+
+function isCode100(error: unknown): boolean {
+  return (
+    error instanceof AxiosError &&
+    (error.response?.data as { error?: { code?: number } } | undefined)?.error?.code === 100
+  );
+}
+
+function isInvalidMetricError(error: unknown): boolean {
+  if (!(error instanceof AxiosError)) return false;
+  const msg = String(
+    (error.response?.data as { error?: { message?: string } } | undefined)?.error?.message ?? ""
+  );
+  return isCode100(error) && /valid insights metric/i.test(msg);
+}
+
+// Runs fetchBatch(metrics). On a code-100 rejection (invalid or period-
+// incompatible metric — unnamed by the API), re-issues one request per metric,
+// keeps those that return, and drops the rest. Metrics that fail specifically as
+// "not a valid insights metric" are cached in deadCache so future calls skip
+// them. Non-100 errors (auth, permission, ...) are real and re-thrown.
+async function fetchInsightsResilient(
+  fetchBatch: (metrics: string[]) => Promise<{ data: unknown[] }>,
+  metrics: string[],
+  deadCache: Set<string>
+): Promise<{ data: unknown[]; dropped: string[] }> {
+  const dropped: string[] = metrics.filter((m) => deadCache.has(m));
+  const active = metrics.filter((m) => !deadCache.has(m));
+  if (active.length === 0) return { data: [], dropped };
+
+  try {
+    const res = await fetchBatch(active);
+    return { data: res.data, dropped };
+  } catch (error) {
+    if (!isCode100(error)) throw error;
+    const settled = await Promise.allSettled(active.map((m) => fetchBatch([m])));
+    const data: unknown[] = [];
+    settled.forEach((result, i) => {
+      const metric = active[i];
+      if (result.status === "fulfilled") {
+        data.push(...result.value.data);
+      } else {
+        dropped.push(metric);
+        if (isInvalidMetricError(result.reason)) deadCache.add(metric);
+      }
+    });
+    return { data, dropped };
+  }
+}
 
 export function registerPageTools(server: McpServer, client: MetaApiClient): void {
   // ─── List Pages ───────────────────────────────────────────────────────────
@@ -664,17 +725,16 @@ Returns: Time-series data for each metric.`,
           metrics: z
             .array(z.string())
             .default([
-              "page_impressions",
-              "page_impressions_unique",
-              "page_engaged_users",
+              // Survivors of Meta's 2025 organic-insights deprecation. Reach /
+              // impressions / page_fans are gone from the API — do not add them.
+              "page_follows",
+              "page_daily_follows_unique",
               "page_post_engagements",
-              "page_fan_adds_unique",
-              "page_fan_removes_unique",
               "page_views_total",
-              "page_actions_post_reactions_total",
               "page_video_views",
+              "page_actions_post_reactions_total",
             ])
-            .describe("Metric names — see description for full list of 70+ available metrics"),
+            .describe("Metric names. NOTE: Meta retired reach/impressions/page_fans from the API in 2025 — the defaults are the surviving organic metrics; unknown ones are dropped automatically."),
           period: z
             .enum(["day", "week", "days_28", "month"])
             .default("day")
@@ -694,39 +754,46 @@ Returns: Time-series data for each metric.`,
     async ({ page_id, metrics, period, since, until, response_format }) => {
       try {
         const pageToken = client.requirePageToken(page_id);
-        const params: Record<string, unknown> = {
-          metric: metrics.join(","),
-          period,
+        const fetchBatch = (ms: string[]) => {
+          const params: Record<string, unknown> = { metric: ms.join(","), period };
+          if (since) params.since = since;
+          if (until) params.until = until;
+          return client.getWithToken<{ data: unknown[] }>(`/${page_id}/insights`, pageToken, params);
         };
-        if (since) params.since = since;
-        if (until) params.until = until;
-
-        const data = await client.getWithToken<{ data: unknown[] }>(
-          `/${page_id}/insights`,
-          pageToken,
-          params
-        );
+        const { data, dropped } = await fetchInsightsResilient(fetchBatch, metrics, DEAD_PAGE_METRICS);
 
         if (response_format === "json") {
-          return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+          return {
+            content: [{ type: "text", text: JSON.stringify({ data, _dropped_metrics: dropped }, null, 2) }],
+          };
         }
 
         const lines = [`# Page Insights: \`${page_id}\``, `**Period**: ${period}`, ""];
-        for (const item of data.data as Array<{
+        for (const item of data as Array<{
           name: string;
           title: string;
           period: string;
-          values: Array<{ value: number; end_time: string }>;
+          values: Array<{ value: number | Record<string, number>; end_time: string }>;
         }>) {
           lines.push(`## ${item.title} (\`${item.name}\`)`);
           if (item.values?.length) {
             for (const v of item.values.slice(-7)) {
-              lines.push(`- ${formatDate(v.end_time)}: **${formatNumber(v.value)}**`);
+              if (v.value && typeof v.value === "object") {
+                lines.push(`- ${formatDate(v.end_time)}:`);
+                for (const [k, val] of Object.entries(v.value)) {
+                  lines.push(`    - ${k}: **${formatNumber(val)}**`);
+                }
+              } else {
+                lines.push(`- ${formatDate(v.end_time)}: **${formatNumber(v.value as number)}**`);
+              }
             }
           } else {
             lines.push("_No data available_");
           }
           lines.push("");
+        }
+        if (dropped.length) {
+          lines.push(`_Skipped (deprecated or unsupported for this period): ${dropped.join(", ")}_`);
         }
         return { content: [{ type: "text", text: truncate(lines.join("\n"), "metrics") }] };
       } catch (error) {
@@ -763,16 +830,15 @@ All post metrics use 'lifetime' period (cumulative from post creation).`,
           metrics: z
             .array(z.string())
             .default([
-              "post_impressions",
-              "post_impressions_unique",
-              "post_impressions_paid",
-              "post_impressions_organic",
-              "post_engaged_users",
+              // Survivors of Meta's 2025 organic post-insights deprecation.
+              // post_impressions*/engaged_users/reactions_by_type_total are gone.
+              "post_activity_by_action_type",
               "post_clicks",
-              "post_reactions_by_type_total",
-              "post_negative_feedback",
+              "post_video_views_organic",
+              "post_video_avg_time_watched",
+              "post_video_view_time",
             ])
-            .describe("Metric names — see description for full list"),
+            .describe("Metric names. NOTE: Meta retired reach/impressions/engaged_users per post in 2025 — defaults are surviving organic metrics (engagement counts + video); unknown ones are dropped automatically."),
           response_format: ResponseFormatSchema,
         })
         .strict(),
@@ -786,18 +852,20 @@ All post metrics use 'lifetime' period (cumulative from post creation).`,
     async ({ post_id, page_id, metrics, response_format }) => {
       try {
         const pageToken = client.requirePageToken(page_id);
-        const data = await client.getWithToken<{ data: unknown[] }>(
-          `/${post_id}/insights`,
-          pageToken,
-          { metric: metrics.join(",") }
-        );
+        const fetchBatch = (ms: string[]) =>
+          client.getWithToken<{ data: unknown[] }>(`/${post_id}/insights`, pageToken, {
+            metric: ms.join(","),
+          });
+        const { data, dropped } = await fetchInsightsResilient(fetchBatch, metrics, DEAD_POST_METRICS);
 
         if (response_format === "json") {
-          return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+          return {
+            content: [{ type: "text", text: JSON.stringify({ data, _dropped_metrics: dropped }, null, 2) }],
+          };
         }
 
         const lines = [`# Post Insights: \`${post_id}\``, ""];
-        for (const item of data.data as Array<{
+        for (const item of data as Array<{
           name: string;
           title: string;
           period: string;
@@ -812,6 +880,9 @@ All post metrics use 'lifetime' period (cumulative from post creation).`,
           } else {
             lines.push(`- **${item.title ?? item.name}**: ${formatNumber(val as number)}`);
           }
+        }
+        if (dropped.length) {
+          lines.push("", `_Skipped (deprecated or unsupported for this post): ${dropped.join(", ")}_`);
         }
         return { content: [{ type: "text", text: lines.join("\n") }] };
       } catch (error) {
