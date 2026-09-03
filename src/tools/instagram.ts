@@ -51,6 +51,27 @@ function namedBadMetrics(error: unknown, candidates: string[]): string[] {
   return [...found].filter((f) => candidates.includes(f));
 }
 
+// Business Discovery must be issued against one of OUR own IG Business accounts.
+// Resolve (and cache) the first IG Business account linked to our Pages so the
+// competitor-benchmark tool can be called with just a username.
+let cachedHostIgId: string | undefined;
+async function resolveHostIgAccountId(client: MetaApiClient): Promise<string> {
+  if (cachedHostIgId) return cachedHostIgId;
+  const res = await client.get<{
+    data: Array<{ instagram_business_account?: { id?: string } }>;
+  }>("/me/accounts", { fields: "instagram_business_account" });
+  const id = res.data?.find((p) => p.instagram_business_account?.id)?.instagram_business_account?.id;
+  if (!id) {
+    throw new Error(
+      "No owned Instagram Business account found to host the Business Discovery query. " +
+        "Business Discovery requires at least one IG Business account on your Pages, and it must be " +
+        "a Business (not Creator) account."
+    );
+  }
+  cachedHostIgId = id;
+  return id;
+}
+
 export function registerInstagramTools(server: McpServer, client: MetaApiClient): void {
   // ─── List Instagram Accounts ──────────────────────────────────────────────
   server.registerTool(
@@ -1146,6 +1167,143 @@ Returns: Bio, follower/following counts, media count, profile picture, and recen
           }
         }
         return { content: [{ type: "text", text: lines.join("\n") }] };
+      } catch (error) {
+        return errorResult(error);
+      }
+    }
+  );
+
+  // ─── Benchmark a Competitor's Instagram (Business Discovery) ──────────────
+  server.registerTool(
+    "meta_get_competitor_instagram",
+    {
+      title: "Benchmark a competitor's Instagram (Business Discovery)",
+      description: `Benchmarks any PUBLIC Instagram Business/Creator account by username, using Meta's Business Discovery API — no follow or account access to the peer required. Built for the werkcentra-learnings peer benchmark: see how competing werkcentra do organically.
+
+Returns: follower count, total post count, and recent posts with their PUBLIC like & comment counts, plus a benchmark summary (avg likes/comments per post and an engagement rate = avg engagement ÷ followers).
+
+Important limits (by design, this is public data):
+  - NO reach or impressions — those stay private to the account owner. Only engagement (likes/comments) + follower growth are available.
+  - The target must be a public Instagram Business or Creator account (personal/private accounts return nothing).
+  - Requires one of OUR OWN IG Business accounts to host the query (auto-resolved) and instagram_basic on the token.
+
+Args:
+  - username (string): the peer's public IG username, without @
+  - ig_account_id (string, optional): our host IG Business account id (auto-resolved if omitted)
+  - limit (number): number of recent posts to analyze (1–50, default 12)`,
+      inputSchema: z
+        .object({
+          username: z.string().min(1).describe("Public IG Business/Creator username to benchmark (without @)"),
+          ig_account_id: z
+            .string()
+            .optional()
+            .describe("Our own IG Business account id to host the query (auto-resolved if omitted)"),
+          limit: z.number().int().min(1).max(50).default(12).describe("Recent posts to analyze (1–50)"),
+          response_format: ResponseFormatSchema,
+        })
+        .strict(),
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    async ({ username, ig_account_id, limit, response_format }) => {
+      try {
+        const hostId = ig_account_id ?? (await resolveHostIgAccountId(client));
+        const bdFields = `username,name,followers_count,media_count,media.limit(${limit}){caption,timestamp,media_product_type,media_type,permalink,like_count,comments_count}`;
+        const data = await client.get<{
+          business_discovery?: {
+            username?: string;
+            name?: string;
+            followers_count?: number;
+            media_count?: number;
+            media?: {
+              data: Array<{
+                id?: string;
+                caption?: string;
+                timestamp?: string;
+                media_product_type?: string;
+                media_type?: string;
+                permalink?: string;
+                like_count?: number;
+                comments_count?: number;
+              }>;
+            };
+          };
+        }>(`/${hostId}`, { fields: `business_discovery.username(${username}){${bdFields}}` });
+
+        const biz = data.business_discovery;
+        if (!biz) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `@${username} not found, private, or not an Instagram Business/Creator account. Business Discovery only returns public professional accounts.`,
+              },
+            ],
+          };
+        }
+
+        const posts = biz.media?.data ?? [];
+        const n = posts.length;
+        const sumLikes = posts.reduce((s, p) => s + (p.like_count ?? 0), 0);
+        const sumComments = posts.reduce((s, p) => s + (p.comments_count ?? 0), 0);
+        const avgLikes = n ? sumLikes / n : 0;
+        const avgComments = n ? sumComments / n : 0;
+        const avgEng = avgLikes + avgComments;
+        const followers = biz.followers_count ?? 0;
+        const engRate = followers ? (avgEng / followers) * 100 : 0;
+
+        if (response_format === "json") {
+          return {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify(
+                  {
+                    ...biz,
+                    _benchmark: {
+                      analyzed_posts: n,
+                      avg_likes: avgLikes,
+                      avg_comments: avgComments,
+                      avg_engagement_per_post: avgEng,
+                      engagement_rate_pct: engRate,
+                    },
+                  },
+                  null,
+                  2
+                ),
+              },
+            ],
+          };
+        }
+
+        const lines = [
+          `# Peer benchmark: @${biz.username ?? username}${biz.name ? ` — ${biz.name}` : ""}`,
+          "",
+          `- **Followers**: ${formatNumber(followers)}`,
+          `- **Total posts**: ${formatNumber(biz.media_count)}`,
+          `- **Analyzed**: ${n} recent post${n === 1 ? "" : "s"}`,
+          `- **Avg likes/post**: ${formatNumber(Math.round(avgLikes))}`,
+          `- **Avg comments/post**: ${formatNumber(Math.round(avgComments))}`,
+          `- **Avg engagement/post**: ${formatNumber(Math.round(avgEng))}`,
+          `- **Engagement rate** (avg engagement ÷ followers): ${engRate.toFixed(2)}%`,
+          "",
+          "_Business Discovery exposes only public engagement — reach & impressions are private and not available._",
+        ];
+
+        if (n) {
+          lines.push("", "## Recent posts", "", "| Date | Type | Likes | Comments | Caption |", "|---|---|---|---|---|");
+          for (const p of posts) {
+            const date = p.timestamp ? formatDate(p.timestamp) : "—";
+            const type = p.media_product_type ?? p.media_type ?? "—";
+            const cap = (truncateField(p.caption, 50) || "—").replace(/\|/g, "/").replace(/\r?\n/g, " ");
+            lines.push(`| ${date} | ${type} | ${formatNumber(p.like_count)} | ${formatNumber(p.comments_count)} | ${cap} |`);
+          }
+        }
+        return { content: [{ type: "text", text: truncate(lines.join("\n"), "posts") }] };
       } catch (error) {
         return errorResult(error);
       }

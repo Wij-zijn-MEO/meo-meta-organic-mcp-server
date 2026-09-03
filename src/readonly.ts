@@ -40,7 +40,8 @@ export const READ_ONLY_TOOLS: ReadonlySet<string> = new Set<string>([
   "meta_get_instagram_comments",        // public comments
   "meta_get_instagram_comment_replies",
   "meta_get_instagram_stories",         // active stories (read)
-  "meta_get_instagram_user",            // public business discovery
+  "meta_get_instagram_user",            // public business discovery (profile)
+  "meta_get_competitor_instagram",      // peer benchmark via business discovery (public engagement)
 
   // --- Diagnostics ---
   "meta_debug_token",   // inspect token scopes/expiry — confirm it is read-only
