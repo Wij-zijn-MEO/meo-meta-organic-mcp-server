@@ -1190,7 +1190,19 @@ Important limits (by design, this is public data):
 Args:
   - username (string): the peer's public IG username, without @
   - ig_account_id (string, optional): our host IG Business account id (auto-resolved if omitted)
-  - limit (number): number of recent posts to analyze (1–50, default 12)`,
+  - limit (number): number of recent posts to analyze (1–50, default 12)
+
+For programmatic use, call with response_format="json". Stable JSON contract:
+  On success: { found: true, username, name, followers_count, media_count,
+    analyzed_posts, avg_likes, avg_comments, avg_engagement_per_post,
+    engagement_rate_pct, posts: [{ id, timestamp, media_type, permalink,
+    like_count, comments_count, caption }] }
+  When the account can't be benchmarked (private / personal / wrong handle):
+    { found: false, username, reason } — this is NOT an error, so batch loops
+    over many usernames never break; check the "found" field.
+  Only genuine failures of OUR host account or token return isError.
+Note: posts are the N most RECENT regardless of date, so inactive accounts
+return stale posts — filter on timestamp for a fair, time-boxed comparison.`,
       inputSchema: z
         .object({
           username: z.string().min(1).describe("Public IG Business/Creator username to benchmark (without @)"),
@@ -1210,10 +1222,27 @@ Args:
       },
     },
     async ({ username, ig_account_id, limit, response_format }) => {
+      // Renders a "not discoverable" outcome WITHOUT throwing, so a skill can
+      // loop over many usernames and one bad handle never breaks the batch.
+      // JSON shape: { found: false, username, reason }.
+      const notFound = (reason: string) => {
+        if (response_format === "json") {
+          return {
+            content: [
+              { type: "text" as const, text: JSON.stringify({ found: false, username, reason }, null, 2) },
+            ],
+          };
+        }
+        return {
+          content: [{ type: "text" as const, text: `# @${username}\n\n_Not benchmarkable: ${reason}_` }],
+        };
+      };
+
       try {
         const hostId = ig_account_id ?? (await resolveHostIgAccountId(client));
-        const bdFields = `username,name,followers_count,media_count,media.limit(${limit}){caption,timestamp,media_product_type,media_type,permalink,like_count,comments_count}`;
-        const data = await client.get<{
+        const bdFields = `username,name,followers_count,media_count,media.limit(${limit}){id,caption,timestamp,media_product_type,media_type,permalink,like_count,comments_count}`;
+
+        let data: {
           business_discovery?: {
             username?: string;
             name?: string;
@@ -1232,18 +1261,33 @@ Args:
               }>;
             };
           };
-        }>(`/${hostId}`, { fields: `business_discovery.username(${username}){${bdFields}}` });
+        };
+        try {
+          data = await client.get(`/${hostId}`, {
+            fields: `business_discovery.username(${username}){${bdFields}}`,
+          });
+        } catch (err) {
+          // Separate "this peer username can't be discovered" (→ found:false)
+          // from real failures with OUR host account or token (→ throw/error).
+          if (err instanceof AxiosError) {
+            const e = (err.response?.data as {
+              error?: { code?: number; error_subcode?: number; message?: string };
+            } | undefined)?.error;
+            const msg = String(e?.message ?? "");
+            if (
+              e?.code === 110 ||
+              e?.error_subcode === 2207013 ||
+              /invalid user|does not exist|not a business|cannot be found|no such/i.test(msg)
+            ) {
+              return notFound("username not found, private, or not a public Instagram Business/Creator account");
+            }
+          }
+          throw err;
+        }
 
         const biz = data.business_discovery;
         if (!biz) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: `@${username} not found, private, or not an Instagram Business/Creator account. Business Discovery only returns public professional accounts.`,
-              },
-            ],
-          };
+          return notFound("no data returned — not a public Business/Creator account");
         }
 
         const posts = biz.media?.data ?? [];
@@ -1255,6 +1299,7 @@ Args:
         const avgEng = avgLikes + avgComments;
         const followers = biz.followers_count ?? 0;
         const engRate = followers ? (avgEng / followers) * 100 : 0;
+        const round2 = (x: number) => Math.round(x * 100) / 100;
 
         if (response_format === "json") {
           return {
@@ -1263,14 +1308,25 @@ Args:
                 type: "text",
                 text: JSON.stringify(
                   {
-                    ...biz,
-                    _benchmark: {
-                      analyzed_posts: n,
-                      avg_likes: avgLikes,
-                      avg_comments: avgComments,
-                      avg_engagement_per_post: avgEng,
-                      engagement_rate_pct: engRate,
-                    },
+                    found: true,
+                    username: biz.username ?? username,
+                    name: biz.name ?? null,
+                    followers_count: followers,
+                    media_count: biz.media_count ?? null,
+                    analyzed_posts: n,
+                    avg_likes: round2(avgLikes),
+                    avg_comments: round2(avgComments),
+                    avg_engagement_per_post: round2(avgEng),
+                    engagement_rate_pct: round2(engRate),
+                    posts: posts.map((p) => ({
+                      id: p.id ?? null,
+                      timestamp: p.timestamp ?? null,
+                      media_type: p.media_product_type ?? p.media_type ?? null,
+                      permalink: p.permalink ?? null,
+                      like_count: p.like_count ?? 0,
+                      comments_count: p.comments_count ?? 0,
+                      caption: p.caption ?? null,
+                    })),
                   },
                   null,
                   2
