@@ -672,8 +672,8 @@ Note: demographic metrics require 100+ followers. online_followers only availabl
           ig_account_id: z.string(),
           metrics: z
             .array(z.string())
-            .default(["reach", "accounts_engaged", "total_interactions", "likes", "comments", "shares", "saves", "profile_links_taps", "account_repost_count"])
-            .describe("Metric names (see description for full list)"),
+            .default(["reach", "accounts_engaged", "total_interactions", "likes", "comments", "shares", "saves", "profile_links_taps"])
+            .describe("Metric names (see description). NOTE: modern metrics (reach/views/interactions) need period 'day' with since/until, not 'days_28'; the tool adds metric_type=total_value automatically."),
           period: z.enum(["day", "week", "days_28", "month", "lifetime"]).default("day"),
           since: z.string().optional(),
           until: z.string().optional(),

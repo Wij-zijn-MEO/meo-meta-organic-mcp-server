@@ -775,7 +775,7 @@ Returns: Time-series data for each metric.`,
           period: string;
           values: Array<{ value: number | Record<string, number>; end_time: string }>;
         }>) {
-          lines.push(`## ${item.title} (\`${item.name}\`)`);
+          lines.push(`## ${item.title ?? item.name} (\`${item.name}\`)`);
           if (item.values?.length) {
             for (const v of item.values.slice(-7)) {
               if (v.value && typeof v.value === "object") {
